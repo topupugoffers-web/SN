@@ -3,84 +3,161 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Name Numbering Tool</title>
+<title>Advanced Name Numbering Tool</title>
 
 <style>
-    *{
-        margin:0;
-        padding:0;
-        box-sizing:border-box;
-        font-family:Segoe UI, sans-serif;
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
 
-    body{
-        background:#f4f6f9;
-        padding:30px;
+    body {
+        background: #f0f4f8;
+        color: #1e293b;
+        padding: 40px 20px;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
     }
 
-    .container{
-        display:flex;
-        gap:20px;
-        height:85vh;
+    .container {
+        display: flex;
+        gap: 24px;
+        width: 100%;
+        max-width: 1200px;
+        height: 80vh;
     }
 
-    .panel{
-        flex:1;
-        background:white;
-        border-radius:12px;
-        box-shadow:0 4px 15px rgba(0,0,0,.1);
-        display:flex;
-        flex-direction:column;
-        overflow:hidden;
+    .panel {
+        flex: 1;
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid #e2e8f0;
+        transition: transform 0.2s, box-shadow 0.2s;
     }
 
-    .header{
-        background:#2563eb;
-        color:white;
-        padding:15px;
-        font-size:18px;
-        font-weight:600;
+    .panel:focus-within {
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
     }
 
-    textarea{
-        flex:1;
-        border:none;
-        outline:none;
-        resize:none;
-        padding:20px;
-        font-size:15px;
-        line-height:1.6;
+    .header {
+        background: #0f172a;
+        color: #f8fafc;
+        padding: 18px 24px;
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border-bottom: 1px solid #1e293b;
     }
 
-    #output{
-        flex:1;
-        padding:20px;
-        overflow:auto;
-        white-space:pre-wrap;
-        font-size:15px;
-        line-height:1.8;
-        background:#fafafa;
+    textarea {
+        flex: 1;
+        border: none;
+        outline: none;
+        resize: none;
+        padding: 24px;
+        font-size: 15px;
+        line-height: 1.6;
+        color: #334155;
+        background: #fff;
     }
 
-    .controls{
-        padding:12px;
-        border-top:1px solid #ddd;
-        display:flex;
-        gap:10px;
+    textarea::placeholder {
+        color: #94a3b8;
     }
 
-    button{
-        background:#2563eb;
-        color:white;
-        border:none;
-        padding:10px 18px;
-        border-radius:8px;
-        cursor:pointer;
-        font-size:14px;
+    #output {
+        flex: 1;
+        padding: 24px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-size: 15px;
+        line-height: 1.6;
+        background: #f8fafc;
+        color: #334155;
+        border-bottom: 1px solid #e2e8f0;
     }
 
-    button:hover{
-        background:#1d4ed8;
+    .controls {
+        padding: 16px 24px;
+        background: #ffffff;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .input-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .input-group label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #64748b;
+    }
+
+    .input-group input {
+        width: 70px;
+        padding: 8px 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 14px;
+        outline: none;
+        color: #1e293b;
+        font-weight: 600;
+        transition: border-color 0.2s;
+    }
+
+    .input-group input:focus {
+        border-color: #2563eb;
+    }
+
+    button {
+        background: #2563eb;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s, transform 0.1s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    button:hover {
+        background: #1d4ed8;
+    }
+
+    button:active {
+        transform: scale(0.98);
+    }
+
+    .btn-secondary {
+        background: #64748b;
+    }
+    
+    .btn-secondary:hover {
+        background: #475569;
+    }
+
+    /* Responsive adjustment */
+    @media (max-width: 768px) {
+        body { padding: 20px; }
+        .container { flex-direction: column; height: auto; }
+        .panel { height: 40vh; }
     }
 </style>
 </head>
@@ -93,6 +170,10 @@
         <textarea id="input" placeholder="Enter one name per line..."></textarea>
 
         <div class="controls">
+            <div class="input-group">
+                <label for="startNumber">Start at:</label>
+                <input type="number" id="startNumber" value="1" min="0">
+            </div>
             <button onclick="generateList()">Generate Numbering</button>
         </div>
     </div>
@@ -102,7 +183,7 @@
         <div id="output"></div>
 
         <div class="controls">
-            <button onclick="copyOutput()">Copy Output</button>
+            <button id="copyBtn" class="btn-secondary" onclick="copyOutput()">Copy Output</button>
         </div>
     </div>
 
@@ -111,6 +192,8 @@
 <script>
 function generateList() {
     const text = document.getElementById("input").value;
+    // Get the start number value, defaulting to 1 if empty or invalid
+    const startNum = parseInt(document.getElementById("startNumber").value) || 1;
 
     const names = text
         .split("\n")
@@ -118,7 +201,7 @@ function generateList() {
         .filter(name => name !== "");
 
     const numbered = names
-        .map((name, index) => `${index + 1}. ${name}`)
+        .map((name, index) => `${startNum + index}. ${name}`)
         .join("\n");
 
     document.getElementById("output").textContent = numbered;
@@ -126,9 +209,21 @@ function generateList() {
 
 function copyOutput() {
     const text = document.getElementById("output").textContent;
+    const copyBtn = document.getElementById("copyBtn");
+
+    if(!text) return;
 
     navigator.clipboard.writeText(text)
-        .then(() => alert("Copied to clipboard!"));
+        .then(() => {
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = "Copied!";
+            copyBtn.style.background = "#10b981"; // Success green
+            
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+                copyBtn.style.background = ""; // Reset to CSS styling
+            }, 2000);
+        });
 }
 </script>
 
