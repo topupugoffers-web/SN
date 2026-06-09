@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Name Numbering Tool</title>
+
+<style>
+    *{
+        margin:0;
+        padding:0;
+        box-sizing:border-box;
+        font-family:Segoe UI, sans-serif;
+    }
+
+    body{
+        background:#f4f6f9;
+        padding:30px;
+    }
+
+    .container{
+        display:flex;
+        gap:20px;
+        height:85vh;
+    }
+
+    .panel{
+        flex:1;
+        background:white;
+        border-radius:12px;
+        box-shadow:0 4px 15px rgba(0,0,0,.1);
+        display:flex;
+        flex-direction:column;
+        overflow:hidden;
+    }
+
+    .header{
+        background:#2563eb;
+        color:white;
+        padding:15px;
+        font-size:18px;
+        font-weight:600;
+    }
+
+    textarea{
+        flex:1;
+        border:none;
+        outline:none;
+        resize:none;
+        padding:20px;
+        font-size:15px;
+        line-height:1.6;
+    }
+
+    #output{
+        flex:1;
+        padding:20px;
+        overflow:auto;
+        white-space:pre-wrap;
+        font-size:15px;
+        line-height:1.8;
+        background:#fafafa;
+    }
+
+    .controls{
+        padding:12px;
+        border-top:1px solid #ddd;
+        display:flex;
+        gap:10px;
+    }
+
+    button{
+        background:#2563eb;
+        color:white;
+        border:none;
+        padding:10px 18px;
+        border-radius:8px;
+        cursor:pointer;
+        font-size:14px;
+    }
+
+    button:hover{
+        background:#1d4ed8;
+    }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+    <div class="panel">
+        <div class="header">Paste Names</div>
+        <textarea id="input" placeholder="Enter one name per line..."></textarea>
+
+        <div class="controls">
+            <button onclick="generateList()">Generate Numbering</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="header">Numbered Output</div>
+        <div id="output"></div>
+
+        <div class="controls">
+            <button onclick="copyOutput()">Copy Output</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function generateList() {
+    const text = document.getElementById("input").value;
+
+    const names = text
+        .split("\n")
+        .map(name => name.trim())
+        .filter(name => name !== "");
+
+    const numbered = names
+        .map((name, index) => `${index + 1}. ${name}`)
+        .join("\n");
+
+    document.getElementById("output").textContent = numbered;
+}
+
+function copyOutput() {
+    const text = document.getElementById("output").textContent;
+
+    navigator.clipboard.writeText(text)
+        .then(() => alert("Copied to clipboard!"));
+}
+</script>
+
+</body>
+</html>
