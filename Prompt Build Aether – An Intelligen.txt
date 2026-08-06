@@ -1,0 +1,484 @@
+Prompt: Build "Aether" – An Intelligent Floating Desktop Companion
+
+I want to build a Windows desktop application called Aether.
+
+Aether is not a chatbot window. It is a small AI companion that lives on the desktop, hovers around the monitor, and gradually becomes an intelligent productivity assistant.
+
+Core Philosophy
+
+The companion should feel like a tiny living assistant rather than software.
+
+It should never interrupt the user unnecessarily.
+
+It should observe (only with permission), learn patterns over time, and become more helpful every day.
+
+The goal is to create something that feels alive.
+
+Platform
+Windows 11
+Python 3.12+
+PySide6
+OpenAI API
+SQLite
+ChromaDB or FAISS for semantic memory
+Windows API (pywin32)
+OCR (EasyOCR or Tesseract)
+Pillow
+pynput
+watchdog
+psutil
+
+The architecture should be modular.
+
+Desktop Companion
+
+Create a transparent floating assistant.
+
+Requirements:
+
+transparent background
+frameless
+always on top
+draggable
+GPU-friendly animations
+smooth 60 FPS
+very lightweight (<100 MB RAM if idle)
+
+The companion should gently hover around the desktop.
+
+Examples of movement:
+
+floating
+idle breathing
+tiny bounce
+blinking
+sleeping when inactive
+happy animation
+thinking animation
+surprised animation
+
+Movement should feel natural, not robotic.
+
+Personality
+
+The companion is friendly and curious.
+
+It is never overly talkative.
+
+It occasionally asks useful questions like:
+
+"Would you like me to remember this?"
+
+"I noticed you've edited this document several times. Should I save it as a template?"
+
+"Would organizing these files help?"
+
+The AI should become more useful instead of more intrusive.
+
+Memory System
+
+The AI should remember:
+
+user preferences
+workflows
+favorite applications
+writing style
+repeated tasks
+document types
+frequently used folders
+common prompts
+common emails
+
+Memory should improve over weeks.
+
+The user can:
+
+view memories
+edit memories
+delete memories
+disable memory completely
+
+Never collect personal information without permission.
+
+Clipboard Intelligence
+
+Monitor clipboard changes.
+
+If the user copies:
+
+an email
+
+↓
+
+Offer:
+
+Improve grammar
+
+Rewrite professionally
+
+Summarize
+
+Generate reply
+
+If copied text is code:
+
+↓
+
+Explain
+
+Debug
+
+Optimize
+
+If copied interview answers:
+
+↓
+
+Generate feedback
+
+Suggest improvements
+
+Highlight weaknesses
+
+Do not automatically send anything.
+
+Screen Awareness
+
+Screen understanding must always require permission.
+
+Capabilities:
+
+analyze screenshots
+summarize documents
+explain diagrams
+identify UI elements
+help fill forms
+understand PDFs
+
+Never continuously record the screen.
+
+Only analyze when requested.
+
+Context Awareness
+
+Detect active applications.
+
+Examples:
+
+Microsoft Word
+
+↓
+
+Offer writing help.
+
+Browser
+
+↓
+
+Summarize page.
+
+Excel
+
+↓
+
+Explain formulas.
+
+Teams
+
+↓
+
+Meeting notes.
+
+WhatsApp Desktop
+
+↓
+
+Suggest replies.
+
+Never send messages automatically.
+
+Suggestions only.
+
+Learning
+
+The AI should improve gradually.
+
+It should discover patterns such as:
+
+Every weekday:
+
+9:00
+
+↓
+
+Open Teams.
+
+10:00
+
+↓
+
+Open CRM.
+
+12:00
+
+↓
+
+Lunch.
+
+2:00
+
+↓
+
+Review documents.
+
+Eventually suggest:
+
+"Would you like me to prepare today's workspace?"
+
+Automation
+
+Allow optional automations.
+
+Examples:
+
+open applications
+organize folders
+rename files
+create reminders
+generate reports
+search notes
+launch websites
+
+Every automation must require confirmation.
+
+Search
+
+Create semantic search over:
+
+PDFs
+
+Word documents
+
+Text files
+
+PowerPoints
+
+Excel files
+
+Markdown
+
+Notes
+
+Allow queries like:
+
+"Find the interview feedback mentioning project management."
+
+"Show every document about hospitality."
+
+UI
+
+The companion expands when clicked.
+
+Panels:
+
+Chat
+
+Memory
+
+Tasks
+
+Files
+
+Settings
+
+History
+
+Search
+
+Animations should remain smooth.
+
+Settings
+
+Allow users to control:
+
+Animation speed
+
+Theme
+
+Companion size
+
+Transparency
+
+Learning mode
+
+Privacy
+
+Permissions
+
+Memory
+
+Automation
+
+Notification frequency
+
+Privacy
+
+Everything should run locally whenever possible.
+
+Cloud AI is only used when the user explicitly requests ChatGPT assistance.
+
+Never upload:
+
+documents
+
+screenshots
+
+clipboard
+
+without permission.
+
+Extensibility
+
+Design a plugin system.
+
+Future plugins:
+
+Calendar
+
+Email
+
+Spotify
+
+Discord
+
+Slack
+
+WhatsApp
+
+Teams
+
+Google Drive
+
+Notion
+
+GitHub
+
+Plugins should be isolated modules.
+
+Code Quality
+
+Use:
+
+MVVM architecture
+
+asyncio
+
+modular folders
+
+dependency injection
+
+logging
+
+unit tests
+
+configuration files
+
+type hints
+
+PEP8
+
+Avoid monolithic files.
+
+Final Goal
+
+The result should feel less like software and more like a tiny desktop companion that quietly helps the user. It should start simple, earn the user's trust, learn gradually, respect privacy, and become increasingly useful without becoming intrusive.
+
+Focus on smooth animations, thoughtful interactions, maintainability, and a privacy-first design.
+
+can you make it
+
+Absolutely. I can help you build it—but not as a single response. This is a real software project on the scale of a small application (likely 15,000–50,000+ lines of code depending on features).
+
+What I can do is act as your software architect and developer throughout the project: design it, write the code, review it, debug it, and help you package it into a Windows application.
+
+I would recommend building it in phases.
+
+Phase 1 – The Companion
+Floating transparent orb.
+Smooth hovering animations.
+Draggable.
+Always on top.
+Expandable chat window.
+Settings panel.
+System tray support.
+Phase 2 – The Brain
+ChatGPT integration.
+Local memory.
+Conversation history.
+Context management.
+Plugin framework.
+Phase 3 – Productivity
+Clipboard detection.
+File search.
+Reminder system.
+Semantic search over documents.
+Note management.
+Phase 4 – Smart Assistant
+Detect active applications.
+WhatsApp suggestions.
+Word document assistance.
+Excel helper.
+Teams meeting assistant.
+Screenshot analysis (only when you request it).
+Phase 5 – Learning
+Learns your workflows.
+Suggests automations.
+Custom shortcuts.
+Personalized recommendations.
+Workflow memory.
+Phase 6 – Polish
+Beautiful animations.
+Custom themes.
+Different companion characters.
+Plugin marketplace.
+Windows installer.
+I also have a few ideas that would make it stand out
+
+Instead of another ChatGPT wrapper, it could feel like a living desktop companion.
+
+For example:
+
+It wanders around your screen instead of sitting in one place.
+It notices when you're working hard and quietly stays out of the way.
+When you seem stuck, it might gently ask, "Need a hand with this?"
+It remembers your preferred writing style and adapts suggestions.
+It can "pick up" files visually and bring them to a favorites area.
+It has a simple emotion system (idle, curious, thinking, celebrating), purely for animation—not pretending to be sentient.
+
+For your workflow, it could eventually recognize recurring tasks such as preparing interview feedback or CRM updates and offer to help without taking actions automatically.
+
+I can build the code with you
+
+We can make this open source or a commercial Windows application that others can download.
+
+I'd recommend using:
+
+Python + PySide6 for the first version (fast to develop).
+C++/Qt or Rust for a later version if you want maximum performance.
+
+I can generate every file:
+
+Project structure
+Python source code
+Animation system
+UI
+Memory engine
+AI integration
+Installer
+Auto-updater
+Documentation
+Tests
+
+The result would be a real desktop application, not just a script.
+
+I suggest treating it like a proper software product from day one, with a clean architecture so it's easy to extend as new ideas come up.
