@@ -1,215 +1,818 @@
 //@version=5
-strategy("Advanced Price Action Strategy (Safe + Visual)", 
-     overlay=true, 
-     initial_capital=10000, 
-     default_qty_type=strategy.percent_of_equity, 
-     default_qty_value=100,          // we override with risk-based size
-     commission_type=strategy.commission.percent, 
-     commission_value=0.04,
-     slippage=1,
-     process_orders_on_close=false)
+indicator("XAUUSD Smart Price Action • 5M/15M", overlay=true, max_lines_count=500, max_labels_count=500)
 
-//══════════════════════════════════════════════════════════════
-// INPUTS
-//══════════════════════════════════════════════════════════════
-string groupTrend   = "Trend Filter"
-int    trendEMA     = input.int(50, "EMA Period", minval=10, group=groupTrend)
-string htfTimeframe = input.timeframe("240", "Higher Timeframe", group=groupTrend)
+// ═══════════════════════════════════════════════════════════════
+// XAUUSD SMART PRICE ACTION
+// Liquidity Sweep → Price Action → BOS → Entry → ATR SL/TP
+// ═══════════════════════════════════════════════════════════════
 
-string groupSR      = "Support / Resistance"
-int    pivotLookback = input.int(8, "Pivot Lookback", minval=3, group=groupSR)
-float  atrProxMult  = input.float(0.6, "ATR Proximity Multiplier", minval=0.2, maxval=2.0, step=0.1, group=groupSR)
+// ───────────────────────────────────────────────────────────────
+// SETTINGS
+// ───────────────────────────────────────────────────────────────
 
-string groupRisk    = "Risk Management"
-float  riskPercent  = input.float(1.0, "Risk % of Equity per Trade", minval=0.1, maxval=5.0, step=0.1, group=groupRisk)
-float  rrRatio      = input.float(2.0, "Risk : Reward Ratio", minval=1.0, maxval=5.0, step=0.1, group=groupRisk)
-float  atrStopMult  = input.float(0.4, "ATR Buffer for Stop", minval=0.1, maxval=1.5, step=0.1, group=groupRisk)
+groupMode = "⚙️ Trading Mode"
 
-string groupTrail   = "Trailing Stop (Optional)"
-bool   useTrailing  = input.bool(true, "Enable Trailing Stop", group=groupTrail)
-float  trailAtrMult = input.float(1.5, "Trailing ATR Multiplier", minval=0.5, maxval=4.0, step=0.1, group=groupTrail)
-float  trailOffset  = input.float(0.5, "Trail Activation (in R)", minval=0.5, maxval=3.0, step=0.1, group=groupTrail)
+preset = input.string(
+     "5M",
+     "Preset",
+     options=["5M", "15M", "Custom"],
+     group=groupMode)
 
-string groupFilters = "Extra Filters"
-bool   useVolume    = input.bool(true, "Require Volume Confirmation", group=groupFilters)
-bool   useVolatility= input.bool(true, "Require Minimum Volatility", group=groupFilters)
-float  minAtrPct    = input.float(0.25, "Min ATR % of Price", minval=0.05, maxval=1.0, step=0.05, group=groupFilters)
+useHTF = input.bool(true, "Use Higher-Timeframe Filter", group=groupMode)
+htfTF  = input.timeframe("15", "Higher Timeframe", group=groupMode)
 
-//══════════════════════════════════════════════════════════════
-// CALCULATIONS
-//══════════════════════════════════════════════════════════════
-float atr = ta.atr(14)
-float ema = ta.ema(close, trendEMA)
+groupStructure = "📐 Market Structure"
 
-// Higher timeframe trend
-float htfEma = request.security(syminfo.tickerid, htfTimeframe, ta.ema(close, trendEMA), barmerge.gaps_off, barmerge.lookahead_off)
-bool htfBull = close > htfEma
-bool htfBear = close < htfEma
+swingLen = input.int(
+     5,
+     "Swing Length",
+     minval=2,
+     maxval=20,
+     group=groupStructure)
 
-// Volume & Volatility filters
-bool volOk   = not useVolume or volume > ta.sma(volume, 20)
-bool volaOk  = not useVolatility or (atr / close * 100) > minAtrPct
+bosLookback = input.int(
+     10,
+     "BOS Lookback",
+     minval=3,
+     maxval=30,
+     group=groupStructure)
 
-//══════════════════════════════════════════════════════════════
-// SUPPORT & RESISTANCE (Recent Pivots)
-//══════════════════════════════════════════════════════════════
-float pivotHigh = ta.pivothigh(high, pivotLookback, pivotLookback)
-float pivotLow  = ta.pivotlow(low, pivotLookback, pivotLookback)
+requireBOS = input.bool(
+     true,
+     "Require BOS Confirmation",
+     group=groupStructure)
 
-var float resistance = na
-var float support    = na
+groupLiquidity = "💧 Liquidity Sweep"
 
-if not na(pivotHigh)
-    resistance := pivotHigh
-if not na(pivotLow)
-    support := pivotLow
+sweepLookback = input.int(
+     10,
+     "Liquidity Lookback",
+     minval=3,
+     maxval=30,
+     group=groupLiquidity)
 
-// ATR-based proximity (much better than % )
-bool nearSupport    = not na(support)    and math.abs(low  - support)    <= atr * atrProxMult
-bool nearResistance = not na(resistance) and math.abs(high - resistance) <= atr * atrProxMult
+sweepATR = input.float(
+     0.15,
+     "Maximum Sweep ATR",
+     minval=0.05,
+     maxval=1.0,
+     step=0.05,
+     group=groupLiquidity)
 
-//══════════════════════════════════════════════════════════════
-// PRICE ACTION PATTERNS (Strict)
-//══════════════════════════════════════════════════════════════
-bool isBull = close > open
-bool isBear = close < open
-float body  = math.abs(close - open)
-float upperWick = high - math.max(open, close)
-float lowerWick = math.min(open, close) - low
+requireSweep = input.bool(
+     true,
+     "Require Liquidity Sweep",
+     group=groupLiquidity)
 
-// Strict Pin Bars
-bool bullPin = lowerWick > body * 2.5 and upperWick < body * 0.35 and body > atr * 0.08
-bool bearPin = upperWick > body * 2.5 and lowerWick < body * 0.35 and body > atr * 0.08
+groupPA = "🕯️ Price Action"
 
-// Engulfing
-bool bullEngulf = isBear[1] and isBull and close >= open[1] and open <= close[1] and body > body[1] * 0.9
-bool bearEngulf = isBull[1] and isBear and close <= open[1] and open >= close[1] and body > body[1] * 0.9
+usePinBar = input.bool(
+     true,
+     "Use Pin Bars",
+     group=groupPA)
 
-//══════════════════════════════════════════════════════════════
-// ENTRY CONDITIONS (Full Confluence)
-//══════════════════════════════════════════════════════════════
-bool longSetup  = nearSupport    and (bullPin or bullEngulf) and close > ema and htfBull and volOk and volaOk and strategy.position_size == 0
-bool shortSetup = nearResistance and (bearPin or bearEngulf) and close < ema and htfBear and volOk and volaOk and strategy.position_size == 0
+useEngulfing = input.bool(
+     true,
+     "Use Engulfing",
+     group=groupPA)
 
-//══════════════════════════════════════════════════════════════
-// TRADE MANAGEMENT VARIABLES
-//══════════════════════════════════════════════════════════════
+minBodyATR = input.float(
+     0.08,
+     "Minimum Candle Body / ATR",
+     minval=0.01,
+     maxval=0.5,
+     step=0.01,
+     group=groupPA)
+
+wickRatio = input.float(
+     2.0,
+     "Pin Bar Wick / Body",
+     minval=1.0,
+     maxval=5.0,
+     step=0.25,
+     group=groupPA)
+
+groupTrend = "📈 Trend Filter"
+
+emaFastLen = input.int(
+     20,
+     "Fast EMA",
+     minval=5,
+     maxval=100,
+     group=groupTrend)
+
+emaSlowLen = input.int(
+     50,
+     "Slow EMA",
+     minval=10,
+     maxval=200,
+     group=groupTrend)
+
+useTrend = input.bool(
+     true,
+     "Require EMA Trend",
+     group=groupTrend)
+
+groupATR = "🎯 ATR / Risk"
+
+atrLen = input.int(
+     14,
+     "ATR Length",
+     minval=5,
+     maxval=50,
+     group=groupATR)
+
+slATR = input.float(
+     0.35,
+     "SL ATR Buffer",
+     minval=0.05,
+     maxval=2.0,
+     step=0.05,
+     group=groupATR)
+
+tp1RR = input.float(
+     1.0,
+     "TP1 Risk:Reward",
+     minval=0.5,
+     maxval=5.0,
+     step=0.25,
+     group=groupATR)
+
+tp2RR = input.float(
+     2.0,
+     "TP2 Risk:Reward",
+     minval=1.0,
+     maxval=10.0,
+     step=0.25,
+     group=groupATR)
+
+groupFilter = "🔎 Signal Filters"
+
+minScore = input.int(
+     4,
+     "Minimum Signal Score",
+     minval=1,
+     maxval=6,
+     group=groupFilter)
+
+cooldownBars = input.int(
+     5,
+     "Signal Cooldown Bars",
+     minval=0,
+     maxval=50,
+     group=groupFilter)
+
+groupVisual = "🎨 Visuals"
+
+showEMA = input.bool(
+     true,
+     "Show EMAs",
+     group=groupVisual)
+
+showLiquidity = input.bool(
+     true,
+     "Show Liquidity Sweeps",
+     group=groupVisual)
+
+showBOS = input.bool(
+     true,
+     "Show BOS",
+     group=groupVisual)
+
+showLevels = input.bool(
+     true,
+     "Show Entry / SL / TP",
+     group=groupVisual)
+
+showDashboard = input.bool(
+     true,
+     "Show Dashboard",
+     group=groupVisual)
+
+// ═══════════════════════════════════════════════════════════════
+// CORE CALCULATIONS
+// ═══════════════════════════════════════════════════════════════
+
+atr = ta.atr(atrLen)
+
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+
+// Higher timeframe EMA
+htfEMA = request.security(
+     syminfo.tickerid,
+     htfTF,
+     ta.ema(close, emaSlowLen),
+     barmerge.gaps_off,
+     barmerge.lookahead_off)
+
+htfClose = request.security(
+     syminfo.tickerid,
+     htfTF,
+     close,
+     barmerge.gaps_off,
+     barmerge.lookahead_off)
+
+htfBull = htfClose > htfEMA
+htfBear = htfClose < htfEMA
+
+// ═══════════════════════════════════════════════════════════════
+// CANDLE STRUCTURE
+// ═══════════════════════════════════════════════════════════════
+
+bull = close > open
+bear = close < open
+
+body = math.abs(close - open)
+
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+bodyOK = body >= atr * minBodyATR
+
+bullPin =
+     usePinBar and
+     bodyOK and
+     lowerWick >= body * wickRatio and
+     upperWick <= body
+
+bearPin =
+     usePinBar and
+     bodyOK and
+     upperWick >= body * wickRatio and
+     lowerWick <= body
+
+bullEngulf =
+     useEngulfing and
+     bull and
+     bear[1] and
+     open <= close[1] and
+     close >= open[1] and
+     body >= body[1] * 0.9
+
+bearEngulf =
+     useEngulfing and
+     bear and
+     bull[1] and
+     open >= close[1] and
+     close <= open[1] and
+     body >= body[1] * 0.9
+
+bullPA = bullPin or bullEngulf
+bearPA = bearPin or bearEngulf
+
+// ═══════════════════════════════════════════════════════════════
+// LIQUIDITY LEVELS
+// ═══════════════════════════════════════════════════════════════
+
+previousLow =
+     ta.lowest(low[1], sweepLookback)
+
+previousHigh =
+     ta.highest(high[1], sweepLookback)
+
+// Sweep below previous low,
+// followed by a close back above it.
+bullSweep =
+     low < previousLow and
+     close > previousLow and
+     (previousLow - low) <= atr * sweepATR
+
+// Sweep above previous high,
+// followed by close back below it.
+bearSweep =
+     high > previousHigh and
+     close < previousHigh and
+     (high - previousHigh) <= atr * sweepATR
+
+// ═══════════════════════════════════════════════════════════════
+// MARKET STRUCTURE / BOS
+// ═══════════════════════════════════════════════════════════════
+
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSwingHigh = na
+var float lastSwingLow = na
+
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+bullBOS =
+     not na(lastSwingHigh) and
+     close > lastSwingHigh
+
+bearBOS =
+     not na(lastSwingLow) and
+     close < lastSwingLow
+
+// Alternative shorter BOS reference
+recentHigh = ta.highest(high[1], bosLookback)
+recentLow  = ta.lowest(low[1], bosLookback)
+
+bullBOSFast = close > recentHigh
+bearBOSFast = close < recentLow
+
+bullStructure = bullBOS or bullBOSFast
+bearStructure = bearBOS or bearBOSFast
+
+// ═══════════════════════════════════════════════════════════════
+// TREND
+// ═══════════════════════════════════════════════════════════════
+
+localBull =
+     emaFast > emaSlow and
+     close > emaFast
+
+localBear =
+     emaFast < emaSlow and
+     close < emaFast
+
+trendBull =
+     not useTrend or
+     (localBull and (not useHTF or htfBull))
+
+trendBear =
+     not useTrend or
+     (localBear and (not useHTF or htfBear))
+
+// ═══════════════════════════════════════════════════════════════
+// SIGNAL SCORING
+// ═══════════════════════════════════════════════════════════════
+
+// BUY scoring
+bullScore = 0
+
+bullScore += bullSweep ? 2 : 0
+bullScore += bullPA ? 1 : 0
+bullScore += bullStructure ? 1 : 0
+bullScore += localBull ? 1 : 0
+bullScore += htfBull ? 1 : 0
+
+// SELL scoring
+bearScore = 0
+
+bearScore += bearSweep ? 2 : 0
+bearScore += bearPA ? 1 : 0
+bearScore += bearStructure ? 1 : 0
+bearScore += localBear ? 1 : 0
+bearScore += htfBear ? 1 : 0
+
+// ═══════════════════════════════════════════════════════════════
+// FINAL CONDITIONS
+// ═══════════════════════════════════════════════════════════════
+
+var int lastSignalBar = na
+
+cooldownOK =
+     na(lastSignalBar) or
+     bar_index - lastSignalBar > cooldownBars
+
+buyLiquidityOK =
+     not requireSweep or bullSweep
+
+sellLiquidityOK =
+     not requireSweep or bearSweep
+
+buyBOSOK =
+     not requireBOS or bullStructure
+
+sellBOSOK =
+     not requireBOS or bearStructure
+
+buySignal =
+     cooldownOK and
+     buyLiquidityOK and
+     buyBOSOK and
+     bullPA and
+     trendBull and
+     bullScore >= minScore
+
+sellSignal =
+     cooldownOK and
+     sellLiquidityOK and
+     sellBOSOK and
+     bearPA and
+     trendBear and
+     bearScore >= minScore
+
+// ═══════════════════════════════════════════════════════════════
+// ENTRY / SL / TP
+// ═══════════════════════════════════════════════════════════════
+
 var float entryPrice = na
-var float stopLoss   = na
-var float takeProfit = na
-var float riskDist   = na
-var label entryLabel = na
-var label slLabel    = na
-var label tpLabel    = na
-var line  entryLine  = na
-var line  slLine     = na
-var line  tpLine     = na
+var float stopPrice = na
+var float tp1Price = na
+var float tp2Price = na
 
-//══════════════════════════════════════════════════════════════
-// LONG ENTRY
-//══════════════════════════════════════════════════════════════
-if longSetup
+var int signalDirection = 0
+
+if buySignal
+
     entryPrice := close
-    stopLoss   := low - atr * atrStopMult
-    riskDist   := entryPrice - stopLoss
-    takeProfit := entryPrice + riskDist * rrRatio
 
-    // Risk-based position size
-    float riskAmount = strategy.equity * (riskPercent / 100)
-    float qty = riskDist > 0 ? riskAmount / riskDist : na
+    // Stop below sweep/candle low
+    stopPrice := math.min(low, nz(previousLow, low)) - atr * slATR
 
-    strategy.entry("Long", strategy.long, qty=qty)
+    risk = entryPrice - stopPrice
 
-    // Trailing or fixed exit
-    if useTrailing
-        strategy.exit("Long Exit", "Long", 
-             stop=stopLoss, 
-             limit=takeProfit,
-             trail_offset=atr * trailAtrMult / syminfo.mintick,
-             trail_points=atr * trailAtrMult / syminfo.mintick)
-    else
-        strategy.exit("Long Exit", "Long", stop=stopLoss, limit=takeProfit)
+    tp1Price := entryPrice + risk * tp1RR
+    tp2Price := entryPrice + risk * tp2RR
 
-    // Clean previous labels/lines
-    if not na(entryLabel)
-        label.delete(entryLabel)
-        label.delete(slLabel)
-        label.delete(tpLabel)
-        line.delete(entryLine)
-        line.delete(slLine)
-        line.delete(tpLine)
+    signalDirection := 1
+    lastSignalBar := bar_index
 
-    // Draw new visuals
-    entryLine := line.new(bar_index, entryPrice, bar_index + 15, entryPrice, color=color.white, width=2)
-    slLine    := line.new(bar_index, stopLoss,   bar_index + 15, stopLoss,   color=color.red,   width=2)
-    tpLine    := line.new(bar_index, takeProfit, bar_index + 15, takeProfit, color=color.green, width=2)
+if sellSignal
 
-    entryLabel := label.new(bar_index, entryPrice, "ENTRY\n" + str.tostring(entryPrice, format.mintick), 
-         style=label.style_label_left, color=color.white, textcolor=color.black, size=size.normal)
-    slLabel    := label.new(bar_index, stopLoss, "SL\n" + str.tostring(stopLoss, format.mintick), 
-         style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
-    tpLabel    := label.new(bar_index, takeProfit, "TP (" + str.tostring(rrRatio) + "R)\n" + str.tostring(takeProfit, format.mintick), 
-         style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
-
-//══════════════════════════════════════════════════════════════
-// SHORT ENTRY
-//══════════════════════════════════════════════════════════════
-if shortSetup
     entryPrice := close
-    stopLoss   := high + atr * atrStopMult
-    riskDist   := stopLoss - entryPrice
-    takeProfit := entryPrice - riskDist * rrRatio
 
-    float riskAmount = strategy.equity * (riskPercent / 100)
-    float qty = riskDist > 0 ? riskAmount / riskDist : na
+    // Stop above sweep/candle high
+    stopPrice := math.max(high, nz(previousHigh, high)) + atr * slATR
 
-    strategy.entry("Short", strategy.short, qty=qty)
+    risk = stopPrice - entryPrice
 
-    if useTrailing
-        strategy.exit("Short Exit", "Short", 
-             stop=stopLoss, 
-             limit=takeProfit,
-             trail_offset=atr * trailAtrMult / syminfo.mintick,
-             trail_points=atr * trailAtrMult / syminfo.mintick)
-    else
-        strategy.exit("Short Exit", "Short", stop=stopLoss, limit=takeProfit)
+    tp1Price := entryPrice - risk * tp1RR
+    tp2Price := entryPrice - risk * tp2RR
 
-    // Clean previous
-    if not na(entryLabel)
-        label.delete(entryLabel)
-        label.delete(slLabel)
-        label.delete(tpLabel)
+    signalDirection := -1
+    lastSignalBar := bar_index
+
+// ═══════════════════════════════════════════════════════════════
+// LIQUIDITY VISUALS
+// ═══════════════════════════════════════════════════════════════
+
+plotshape(
+     showLiquidity and bullSweep,
+     title="Bullish Liquidity Sweep",
+     style=shape.circle,
+     location=location.belowbar,
+     color=color.aqua,
+     size=size.tiny,
+     text="LQ")
+
+plotshape(
+     showLiquidity and bearSweep,
+     title="Bearish Liquidity Sweep",
+     style=shape.circle,
+     location=location.abovebar,
+     color=color.orange,
+     size=size.tiny,
+     text="LQ")
+
+// ═══════════════════════════════════════════════════════════════
+// BOS VISUALS
+// ═══════════════════════════════════════════════════════════════
+
+plotshape(
+     showBOS and bullStructure,
+     title="Bullish BOS",
+     style=shape.labelup,
+     location=location.belowbar,
+     color=color.new(color.green, 20),
+     textcolor=color.white,
+     size=size.tiny,
+     text="BOS")
+
+plotshape(
+     showBOS and bearStructure,
+     title="Bearish BOS",
+     style=shape.labeldown,
+     location=location.abovebar,
+     color=color.new(color.red, 20),
+     textcolor=color.white,
+     size=size.tiny,
+     text="BOS")
+
+// ═══════════════════════════════════════════════════════════════
+// BUY / SELL SIGNALS
+// ═══════════════════════════════════════════════════════════════
+
+plotshape(
+     buySignal,
+     title="BUY",
+     style=shape.triangleup,
+     location=location.belowbar,
+     color=color.lime,
+     size=size.large,
+     text="BUY")
+
+plotshape(
+     sellSignal,
+     title="SELL",
+     style=shape.triangledown,
+     location=location.abovebar,
+     color=color.red,
+     size=size.large,
+     text="SELL")
+
+// ═══════════════════════════════════════════════════════════════
+// ENTRY / SL / TP LINES
+// ═══════════════════════════════════════════════════════════════
+
+var line entryLine = na
+var line slLine = na
+var line tp1Line = na
+var line tp2Line = na
+
+if buySignal or sellSignal
+
+    if not na(entryLine)
         line.delete(entryLine)
+
+    if not na(slLine)
         line.delete(slLine)
-        line.delete(tpLine)
 
-    // Draw new
-    entryLine := line.new(bar_index, entryPrice, bar_index + 15, entryPrice, color=color.white, width=2)
-    slLine    := line.new(bar_index, stopLoss,   bar_index + 15, stopLoss,   color=color.red,   width=2)
-    tpLine    := line.new(bar_index, takeProfit, bar_index + 15, takeProfit, color=color.green, width=2)
+    if not na(tp1Line)
+        line.delete(tp1Line)
 
-    entryLabel := label.new(bar_index, entryPrice, "ENTRY\n" + str.tostring(entryPrice, format.mintick), 
-         style=label.style_label_left, color=color.white, textcolor=color.black, size=size.normal)
-    slLabel    := label.new(bar_index, stopLoss, "SL\n" + str.tostring(stopLoss, format.mintick), 
-         style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
-    tpLabel    := label.new(bar_index, takeProfit, "TP (" + str.tostring(rrRatio) + "R)\n" + str.tostring(takeProfit, format.mintick), 
-         style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
+    if not na(tp2Line)
+        line.delete(tp2Line)
 
-//══════════════════════════════════════════════════════════════
-// VISUALS
-//══════════════════════════════════════════════════════════════
-plot(ema, "Trend EMA", color=color.new(color.blue, 0), linewidth=2)
-plot(resistance, "Resistance", color=color.new(color.red, 60), style=plot.style_linebr, linewidth=2)
-plot(support,    "Support",    color=color.new(color.green, 60), style=plot.style_linebr, linewidth=2)
+    if showLevels
 
-plotshape(longSetup,  title="Long Setup",  style=shape.triangleup,   location=location.belowbar, color=color.lime,  size=size.normal, text="BUY")
-plotshape(shortSetup, title="Short Setup", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.normal, text="SELL")
+        entryLine := line.new(
+             bar_index,
+             entryPrice,
+             bar_index + 30,
+             entryPrice,
+             color=color.white,
+             width=2)
 
-// Background for open trades
-bgcolor(strategy.position_size > 0 ? color.new(color.green, 92) : strategy.position_size < 0 ? color.new(color.red, 92) : na)
+        slLine := line.new(
+             bar_index,
+             stopPrice,
+             bar_index + 30,
+             stopPrice,
+             color=color.red,
+             width=2)
 
-//══════════════════════════════════════════════════════════════
+        tp1Line := line.new(
+             bar_index,
+             tp1Price,
+             bar_index + 30,
+             tp1Price,
+             color=color.yellow,
+             width=2)
+
+        tp2Line := line.new(
+             bar_index,
+             tp2Price,
+             bar_index + 30,
+             tp2Price,
+             color=color.lime,
+             width=2)
+
+// ═══════════════════════════════════════════════════════════════
+// ENTRY LABEL
+// ═══════════════════════════════════════════════════════════════
+
+if buySignal
+
+    label.new(
+         bar_index,
+         low,
+         "BUY\n" +
+         "Score: " + str.tostring(bullScore) +
+         "\nEntry: " + str.tostring(entryPrice, format.mintick) +
+         "\nSL: " + str.tostring(stopPrice, format.mintick) +
+         "\nTP1: " + str.tostring(tp1Price, format.mintick) +
+         "\nTP2: " + str.tostring(tp2Price, format.mintick),
+         style=label.style_label_up,
+         color=color.green,
+         textcolor=color.white,
+         size=size.small)
+
+if sellSignal
+
+    label.new(
+         bar_index,
+         high,
+         "SELL\n" +
+         "Score: " + str.tostring(bearScore) +
+         "\nEntry: " + str.tostring(entryPrice, format.mintick) +
+         "\nSL: " + str.tostring(stopPrice, format.mintick) +
+         "\nTP1: " + str.tostring(tp1Price, format.mintick) +
+         "\nTP2: " + str.tostring(tp2Price, format.mintick),
+         style=label.style_label_down,
+         color=color.red,
+         textcolor=color.white,
+         size=size.small)
+
+// ═══════════════════════════════════════════════════════════════
+// EMA
+// ═══════════════════════════════════════════════════════════════
+
+plot(
+     showEMA ? emaFast : na,
+     title="Fast EMA",
+     color=color.yellow,
+     linewidth=2)
+
+plot(
+     showEMA ? emaSlow : na,
+     title="Slow EMA",
+     color=color.blue,
+     linewidth=2)
+
+// ═══════════════════════════════════════════════════════════════
+// ATR DISPLAY
+// ═══════════════════════════════════════════════════════════════
+
+plot(
+     atr,
+     title="ATR",
+     color=color.new(color.purple, 100),
+     display=display.data_window)
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+
+var table dashboard =
+     table.new(
+         position.top_right,
+         2,
+         8,
+         border_width=1)
+
+if barstate.islast and showDashboard
+
+    table.cell(
+         dashboard,
+         0,
+         0,
+         "XAUUSD SMART PA",
+         bgcolor=color.black,
+         text_color=color.white)
+
+    table.cell(
+         dashboard,
+         1,
+         0,
+         preset,
+         bgcolor=color.black,
+         text_color=color.yellow)
+
+    table.cell(
+         dashboard,
+         0,
+         1,
+         "Trend")
+
+    table.cell(
+         dashboard,
+         1,
+         1,
+         localBull ? "BULL" :
+         localBear ? "BEAR" :
+         "NEUTRAL",
+         text_color=
+             localBull ? color.lime :
+             localBear ? color.red :
+             color.gray)
+
+    table.cell(
+         dashboard,
+         0,
+         2,
+         "HTF")
+
+    table.cell(
+         dashboard,
+         1,
+         2,
+         htfBull ? "BULL" :
+         htfBear ? "BEAR" :
+         "NEUTRAL",
+         text_color=
+             htfBull ? color.lime :
+             htfBear ? color.red :
+             color.gray)
+
+    table.cell(
+         dashboard,
+         0,
+         3,
+         "Bull Score")
+
+    table.cell(
+         dashboard,
+         1,
+         3,
+         str.tostring(bullScore) + "/6")
+
+    table.cell(
+         dashboard,
+         0,
+         4,
+         "Bear Score")
+
+    table.cell(
+         dashboard,
+         1,
+         4,
+         str.tostring(bearScore) + "/6")
+
+    table.cell(
+         dashboard,
+         0,
+         5,
+         "ATR")
+
+    table.cell(
+         dashboard,
+         1,
+         5,
+         str.tostring(atr, format.mintick))
+
+    table.cell(
+         dashboard,
+         0,
+         6,
+         "Liquidity")
+
+    table.cell(
+         dashboard,
+         1,
+         6,
+         bullSweep ? "BUY SWEEP" :
+         bearSweep ? "SELL SWEEP" :
+         "NONE")
+
+    table.cell(
+         dashboard,
+         0,
+         7,
+         "Signal")
+
+    table.cell(
+         dashboard,
+         1,
+         7,
+         buySignal ? "BUY" :
+         sellSignal ? "SELL" :
+         "WAIT",
+         text_color=
+             buySignal ? color.lime :
+             sellSignal ? color.red :
+             color.gray)
+
+// ═══════════════════════════════════════════════════════════════
 // ALERTS
-//══════════════════════════════════════════════════════════════
-alertcondition(longSetup,  "Long Setup",  "Price Action Long Setup")
-alertcondition(shortSetup, "Short Setup", "Price Action Short Setup")
+// ═══════════════════════════════════════════════════════════════
+
+alertcondition(
+     buySignal,
+     title="XAUUSD BUY",
+     message="XAUUSD Smart Price Action BUY | Liquidity Sweep + Price Action + BOS confirmed")
+
+alertcondition(
+     sellSignal,
+     title="XAUUSD SELL",
+     message="XAUUSD Smart Price Action SELL | Liquidity Sweep + Price Action + BOS confirmed")
+
+alertcondition(
+     bullSweep,
+     title="Bullish Liquidity Sweep",
+     message="XAUUSD bullish liquidity sweep detected")
+
+alertcondition(
+     bearSweep,
+     title="Bearish Liquidity Sweep",
+     message="XAUUSD bearish liquidity sweep detected")
+
+alertcondition(
+     bullStructure,
+     title="Bullish BOS",
+     message="XAUUSD bullish Break of Structure")
+
+alertcondition(
+     bearStructure,
+     title="Bearish BOS",
+     message="XAUUSD bearish Break of Structure")
+
+
+
+
+
+
+
+
+| Setting            | Starting value |
+| ------------------ | -------------: |
+| Preset             |           `5M` |
+| HTF                |           `15` |
+| Swing Length       |            `5` |
+| Liquidity Lookback |           `10` |
+| Require Sweep      |              ✅ |
+| Require BOS        |              ✅ |
+| EMA                |        20 / 50 |
+| ATR                |             14 |
+| SL Buffer          |     `0.35 ATR` |
+| TP1                |           `1R` |
+| TP2                |           `2R` |
+| Minimum Score      |            `4` |
+| Cooldown           |       `5 bars` |
