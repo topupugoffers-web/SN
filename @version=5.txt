@@ -1,33 +1,54 @@
 //@version=5
-indicator("XAUUSD MTF Smart Price Action PRO V2 • Confirmed", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("XAUUSD Smart Price Action PRO V3 • Selective Confirmed", overlay=true, max_lines_count=500, max_labels_count=500)
 
-// ═══════════════════════════════════════════════════════════════
-// XAUUSD MTF SMART PRICE ACTION PRO V2
+// ============================================================================
+// XAUUSD SMART PRICE ACTION PRO V3
+// SELECTIVE / CONFIRMED / NO-REPAINT DESIGN
 //
-// CONFIRMED MTF DESIGN
+// PRIMARY USE:
+//     XAUUSD 5M
 //
-// 5M:
-// 1H  = Bias
-// 30M = Structure
-// 15M = Location / Liquidity
-// 5M  = Entry Trigger
+// 5M MODE:
+//     1H  = Direction / Bias
+//     30M = Structure
+//     15M = Location / Liquidity
+//     5M  = Trigger
 //
-// 15M:
-// 4H  = Bias
-// 1H  = Structure
-// 30M = Location / Liquidity
-// 15M = Entry Trigger
+// 15M MODE:
+//     4H  = Direction / Bias
+//     1H  = Structure
+//     30M = Location / Liquidity
+//     15M = Trigger
 //
-// Higher-timeframe calculations use CONFIRMED candles.
-// Signals are generated only after the current chart candle closes.
-// ═══════════════════════════════════════════════════════════════
+// IMPORTANT:
+//     HTF values use previous CLOSED HTF candles.
+//     Signals are only generated on confirmed chart candles.
+//     This is designed to prevent HTF repainting/future leakage.
+//
+// V3 MAIN IDEA:
+//
+//     NO TRADE
+//         ↓
+//     WATCH
+//         ↓
+//     LIQUIDITY SWEEP
+//         ↓
+//     REJECTION / PRICE ACTION
+//         ↓
+//     BOS
+//         ↓
+//     RISK / R:R / VOLATILITY CHECK
+//         ↓
+//     CONFIRMED SETUP
+//
+// ============================================================================
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // MODE
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
-groupMode = "⚙️ MTF MODE"
+groupMode = "⚙️ V3 MODE"
 
 mode = input.string(
      "5M",
@@ -52,18 +73,23 @@ useLocation = input.bool(
 
 requireSweep = input.bool(
      true,
-     "Require Entry Liquidity Sweep",
+     "Require 5M Liquidity Sweep",
      group=groupMode)
 
 requireBOS = input.bool(
      true,
-     "Require Entry BOS",
+     "Require 5M BOS",
+     group=groupMode)
+
+requirePA = input.bool(
+     true,
+     "Require Price Action",
      group=groupMode)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // TIMEFRAME MAP
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 biasTF =
      mode == "5M" ? "60" : "240"
@@ -77,10 +103,13 @@ locationTF =
 entryTF =
      mode == "5M" ? "5" : "15"
 
+chartTFValid =
+     timeframe.period == entryTF
 
-// ═══════════════════════════════════════════════════════════════
-// TREND SETTINGS
-// ═══════════════════════════════════════════════════════════════
+
+// ============================================================================
+// TREND
+// ============================================================================
 
 groupTrend = "📈 TREND"
 
@@ -99,9 +128,9 @@ emaSlowLen = input.int(
      group=groupTrend)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // STRUCTURE
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 groupStructure = "📐 STRUCTURE"
 
@@ -116,13 +145,13 @@ bosLookback = input.int(
      5,
      "BOS Lookback",
      minval=2,
-     maxval=20,
+     maxval=30,
      group=groupStructure)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // LIQUIDITY
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 groupLiquidity = "💧 LIQUIDITY"
 
@@ -141,10 +170,15 @@ sweepATR = input.float(
      step=0.05,
      group=groupLiquidity)
 
+requireLocationSweep = input.bool(
+     false,
+     "Require 15M Location Sweep",
+     group=groupLiquidity)
 
-// ═══════════════════════════════════════════════════════════════
+
+// ============================================================================
 // PRICE ACTION
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 groupPA = "🕯️ PRICE ACTION"
 
@@ -175,26 +209,26 @@ minBodyATR = input.float(
      group=groupPA)
 
 
-// ═══════════════════════════════════════════════════════════════
-// ATR / TARGETS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// ATR / RISK
+// ============================================================================
 
-groupATR = "🎯 ATR / TARGETS"
+groupRisk = "🎯 ATR / RISK"
 
 atrLen = input.int(
      14,
      "ATR Length",
      minval=5,
      maxval=50,
-     group=groupATR)
+     group=groupRisk)
 
-slATR = input.float(
-     0.35,
-     "SL ATR Buffer",
+slATRBuffer = input.float(
+     0.20,
+     "Structural SL ATR Buffer",
      minval=0.05,
      maxval=2.0,
      step=0.05,
-     group=groupATR)
+     group=groupRisk)
 
 tp1RR = input.float(
      1.0,
@@ -202,7 +236,7 @@ tp1RR = input.float(
      minval=0.5,
      maxval=5.0,
      step=0.25,
-     group=groupATR)
+     group=groupRisk)
 
 tp2RR = input.float(
      2.0,
@@ -210,33 +244,104 @@ tp2RR = input.float(
      minval=1.0,
      maxval=10.0,
      step=0.25,
-     group=groupATR)
+     group=groupRisk)
+
+minimumRR = input.float(
+     1.50,
+     "Minimum TP2 R:R",
+     minval=1.0,
+     maxval=5.0,
+     step=0.25,
+     group=groupRisk)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// VOLATILITY FILTER
+// ============================================================================
+
+groupVol = "🌡️ VOLATILITY FILTER"
+
+useVolatilityFilter = input.bool(
+     true,
+     "Use Volatility Filter",
+     group=groupVol)
+
+atrAverageLen = input.int(
+     50,
+     "ATR Average Length",
+     minval=10,
+     maxval=200,
+     group=groupVol)
+
+minATRFactor = input.float(
+     0.80,
+     "Minimum ATR vs Average",
+     minval=0.20,
+     maxval=2.0,
+     step=0.05,
+     group=groupVol)
+
+maxATRFactor = input.float(
+     1.80,
+     "Maximum ATR vs Average",
+     minval=1.0,
+     maxval=5.0,
+     step=0.10,
+     group=groupVol)
+
+
+// ============================================================================
+// SESSION FILTER
+// ============================================================================
+
+groupSession = "🕐 SESSION"
+
+useSessionFilter = input.bool(
+     true,
+     "Use Trading Session",
+     group=groupSession)
+
+sessionInput = input.session(
+     "0700-1700",
+     "Active Session",
+     group=groupSession)
+
+inSession =
+     not useSessionFilter or
+     not na(time(timeframe.period, sessionInput))
+
+
+// ============================================================================
 // SIGNAL QUALITY
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
-groupScore = "⭐ SIGNAL QUALITY"
+groupQuality = "⭐ V3 SELECTIVITY"
 
 minimumScore = input.int(
-     7,
+     8,
      "Minimum Score",
      minval=1,
      maxval=11,
-     group=groupScore)
+     group=groupQuality)
+
+confirmedScore = input.int(
+     8,
+     "Confirmed Setup Score",
+     minval=1,
+     maxval=11,
+     group=groupQuality)
 
 cooldownBars = input.int(
-     5,
+     8,
      "Signal Cooldown",
      minval=0,
-     maxval=50,
-     group=groupScore)
+     maxval=100,
+     group=groupQuality)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // VISUALS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 groupVisual = "🎨 VISUALS"
 
@@ -265,23 +370,15 @@ showDashboard = input.bool(
      "Show Dashboard",
      group=groupVisual)
 
+showWatch = input.bool(
+     true,
+     "Show WATCH Labels",
+     group=groupVisual)
 
-// ═══════════════════════════════════════════════════════════════
-// CONFIRMED HTF FUNCTIONS
-// ═══════════════════════════════════════════════════════════════
 
-// IMPORTANT:
-//
-// [1] means we use the PREVIOUS CLOSED HTF candle.
-// lookahead_on then safely carries that confirmed value
-// across the lower timeframe bars.
-//
-// This prevents the current unfinished HTF candle from changing
-// the historical/current signal.
-
-// ───────────────────────────────────────────────────────────────
-// BULL TREND
-// ───────────────────────────────────────────────────────────────
+// ============================================================================
+// CONFIRMED HTF TREND
+// ============================================================================
 
 f_confirmedBullTrend(tf) =>
     request.security(
@@ -296,9 +393,6 @@ f_confirmedBullTrend(tf) =>
          barmerge.gaps_off,
          barmerge.lookahead_on)
 
-// ───────────────────────────────────────────────────────────────
-// BEAR TREND
-// ───────────────────────────────────────────────────────────────
 
 f_confirmedBearTrend(tf) =>
     request.security(
@@ -314,9 +408,9 @@ f_confirmedBearTrend(tf) =>
          barmerge.lookahead_on)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // CONFIRMED HTF STRUCTURE
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 f_confirmedStructureBull(tf) =>
     request.security(
@@ -325,6 +419,7 @@ f_confirmedStructureBull(tf) =>
          close[1] > ta.highest(high[2], swingLen * 2),
          barmerge.gaps_off,
          barmerge.lookahead_on)
+
 
 f_confirmedStructureBear(tf) =>
     request.security(
@@ -335,9 +430,9 @@ f_confirmedStructureBear(tf) =>
          barmerge.lookahead_on)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // CONFIRMED HTF LOCATION
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 f_confirmedLocationBull(tf) =>
     request.security(
@@ -346,6 +441,7 @@ f_confirmedLocationBull(tf) =>
          close[1] > ta.ema(close, emaFastLen)[1],
          barmerge.gaps_off,
          barmerge.lookahead_on)
+
 
 f_confirmedLocationBear(tf) =>
     request.security(
@@ -356,9 +452,9 @@ f_confirmedLocationBear(tf) =>
          barmerge.lookahead_on)
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // CONFIRMED HTF LIQUIDITY
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 f_confirmedSweepBull(tf) =>
     request.security(
@@ -368,6 +464,7 @@ f_confirmedSweepBull(tf) =>
          close[1] > ta.lowest(low[2], liquidityLookback),
          barmerge.gaps_off,
          barmerge.lookahead_on)
+
 
 f_confirmedSweepBear(tf) =>
     request.security(
@@ -379,9 +476,9 @@ f_confirmedSweepBear(tf) =>
          barmerge.lookahead_on)
 
 
-// ═══════════════════════════════════════════════════════════════
-// HIGHER-TIMEFRAME DATA
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// HTF DATA
+// ============================================================================
 
 biasBull =
      f_confirmedBullTrend(biasTF)
@@ -408,24 +505,41 @@ locationSweepBear =
      f_confirmedSweepBear(locationTF)
 
 
-// ═══════════════════════════════════════════════════════════════
-// CURRENT ENTRY TIMEFRAME
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// CURRENT TIMEFRAME
+// ============================================================================
 
 atr = ta.atr(atrLen)
 
+atrAverage = ta.sma(atr, atrAverageLen)
+
+atrRatio =
+     atrAverage > 0 ?
+     atr / atrAverage :
+     1.0
+
+volatilityOK =
+     not useVolatilityFilter or
+     (
+         atrRatio >= minATRFactor and
+         atrRatio <= maxATRFactor
+     )
+
 emaFast = ta.ema(close, emaFastLen)
+
 emaSlow = ta.ema(close, emaSlowLen)
 
 
-// ═══════════════════════════════════════════════════════════════
-// CURRENT CANDLE
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// CANDLE DATA
+// ============================================================================
 
 bull = close > open
+
 bear = close < open
 
-body = math.abs(close - open)
+body =
+     math.abs(close - open)
 
 upperWick =
      high - math.max(open, close)
@@ -437,9 +551,9 @@ bodyOK =
      body >= atr * minBodyATR
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // PIN BARS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 bullPin =
      usePinBar and
@@ -456,9 +570,9 @@ bearPin =
      lowerWick <= body
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // ENGULFING
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 bullEngulf =
      useEngulfing and
@@ -474,6 +588,7 @@ bearEngulf =
      open >= close[1] and
      close <= open[1]
 
+
 bullPA =
      bullPin or bullEngulf
 
@@ -481,9 +596,9 @@ bearPA =
      bearPin or bearEngulf
 
 
-// ═══════════════════════════════════════════════════════════════
-// CURRENT-TF LIQUIDITY SWEEP
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// CURRENT-TF LIQUIDITY
+// ============================================================================
 
 previousLow =
      ta.lowest(low[1], liquidityLookback)
@@ -502,9 +617,22 @@ bearSweep =
      (high - previousHigh) <= atr * sweepATR
 
 
-// ═══════════════════════════════════════════════════════════════
+// Store the actual sweep extreme.
+// This becomes the structural invalidation reference.
+
+var float lastBullSweepLow = na
+var float lastBearSweepHigh = na
+
+if bullSweep
+    lastBullSweepLow := low
+
+if bearSweep
+    lastBearSweepHigh := high
+
+
+// ============================================================================
 // CURRENT-TF BOS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 recentHigh =
      ta.highest(high[1], bosLookback)
@@ -519,9 +647,9 @@ bearBOS =
      close < recentLow
 
 
-// ═══════════════════════════════════════════════════════════════
-// CURRENT-TF TREND
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// LOCAL TREND
+// ============================================================================
 
 localBull =
      emaFast > emaSlow and
@@ -532,37 +660,189 @@ localBear =
      close < emaFast
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// LOCATION ALIGNMENT
+// ============================================================================
+
+locationBullOK =
+     not useLocation or
+     locationBull or
+     locationSweepBull
+
+locationBearOK =
+     not useLocation or
+     locationBear or
+     locationSweepBear
+
+locationSweepBullOK =
+     not requireLocationSweep or
+     locationSweepBull
+
+locationSweepBearOK =
+     not requireLocationSweep or
+     locationSweepBear
+
+
+// ============================================================================
 // SCORE
-// ═══════════════════════════════════════════════════════════════
-
+//
 // Maximum = 11
+//
+// 2 = HTF bias
+// 2 = HTF structure
+// 1 = HTF location
+// 2 = HTF liquidity
+// 1 = 5M sweep
+// 1 = price action
+// 1 = BOS
+// 1 = local trend
+//
+// Raw total can reach 11+ if every condition is present.
+// The score is capped at 11 for display.
+// ============================================================================
 
-bullScore = 0
+bullScoreRaw = 0
 
-bullScore += biasBull ? 2 : 0
-bullScore += structureBull ? 2 : 0
-bullScore += locationBull ? 1 : 0
-bullScore += locationSweepBull ? 2 : 0
-bullScore += bullSweep ? 1 : 0
-bullScore += bullPA ? 1 : 0
-bullScore += bullBOS ? 1 : 0
+bullScoreRaw += biasBull ? 2 : 0
+bullScoreRaw += structureBull ? 2 : 0
+bullScoreRaw += locationBull ? 1 : 0
+bullScoreRaw += locationSweepBull ? 2 : 0
+bullScoreRaw += bullSweep ? 1 : 0
+bullScoreRaw += bullPA ? 1 : 0
+bullScoreRaw += bullBOS ? 1 : 0
+bullScoreRaw += localBull ? 1 : 0
 
-
-bearScore = 0
-
-bearScore += biasBear ? 2 : 0
-bearScore += structureBear ? 2 : 0
-bearScore += locationBear ? 1 : 0
-bearScore += locationSweepBear ? 2 : 0
-bearScore += bearSweep ? 1 : 0
-bearScore += bearPA ? 1 : 0
-bearScore += bearBOS ? 1 : 0
+bullScore =
+     math.min(bullScoreRaw, 11)
 
 
-// ═══════════════════════════════════════════════════════════════
-// FINAL CONFIRMED SIGNAL
-// ═══════════════════════════════════════════════════════════════
+bearScoreRaw = 0
+
+bearScoreRaw += biasBear ? 2 : 0
+bearScoreRaw += structureBear ? 2 : 0
+bearScoreRaw += locationBear ? 1 : 0
+bearScoreRaw += locationSweepBear ? 2 : 0
+bearScoreRaw += bearSweep ? 1 : 0
+bearScoreRaw += bearPA ? 1 : 0
+bearScoreRaw += bearBOS ? 1 : 0
+bearScoreRaw += localBear ? 1 : 0
+
+bearScore =
+     math.min(bearScoreRaw, 11)
+
+
+// ============================================================================
+// SEQUENCE VALIDATION
+//
+// This is the main V3 improvement.
+//
+// BUY sequence:
+//
+// HTF alignment
+// +
+// liquidity sweep
+// +
+// rejection / PA
+// +
+// BOS
+// +
+// local trend
+//
+// SELL is opposite.
+// ============================================================================
+
+bullHTFAligned =
+     (not useBias or biasBull) and
+     (not useStructure or structureBull) and
+     locationBullOK and
+     locationSweepBullOK
+
+bearHTFAligned =
+     (not useBias or biasBear) and
+     (not useStructure or structureBear) and
+     locationBearOK and
+     locationSweepBearOK
+
+
+bullTrigger =
+     bullSweep and
+     bullPA and
+     bullBOS
+
+bearTrigger =
+     bearSweep and
+     bearPA and
+     bearBOS
+
+
+// ============================================================================
+// STRUCTURAL STOP
+// ============================================================================
+
+bullStructuralStop =
+     not na(lastBullSweepLow) ?
+     lastBullSweepLow - atr * slATRBuffer :
+     low - atr * slATRBuffer
+
+bearStructuralStop =
+     not na(lastBearSweepHigh) ?
+     lastBearSweepHigh + atr * slATRBuffer :
+     high + atr * slATRBuffer
+
+
+// ============================================================================
+// POTENTIAL ENTRY / RISK
+// ============================================================================
+
+potentialBuyEntry =
+     close
+
+potentialSellEntry =
+     close
+
+potentialBuySL =
+     bullStructuralStop
+
+potentialSellSL =
+     bearStructuralStop
+
+buyRisk =
+     potentialBuyEntry - potentialBuySL
+
+sellRisk =
+     potentialSellSL - potentialSellEntry
+
+
+buyTP2 =
+     potentialBuyEntry + buyRisk * tp2RR
+
+sellTP2 =
+     potentialSellEntry - sellRisk * tp2RR
+
+
+buyRR =
+     buyRisk > 0 ?
+     math.abs(buyTP2 - potentialBuyEntry) / buyRisk :
+     0
+
+sellRR =
+     sellRisk > 0 ?
+     math.abs(potentialSellEntry - sellTP2) / sellRisk :
+     0
+
+
+buyRiskOK =
+     buyRisk > syminfo.mintick and
+     buyRR >= minimumRR
+
+sellRiskOK =
+     sellRisk > syminfo.mintick and
+     sellRR >= minimumRR
+
+
+// ============================================================================
+// COOLDOWN
+// ============================================================================
 
 var int lastSignalBar = na
 
@@ -570,97 +850,141 @@ cooldownOK =
      na(lastSignalBar) or
      bar_index - lastSignalBar > cooldownBars
 
-buySweepOK =
-     not requireSweep or bullSweep
 
-sellSweepOK =
-     not requireSweep or bearSweep
+// ============================================================================
+// WATCH CONDITIONS
+//
+// WATCH means conditions are developing.
+// It NEVER produces the confirmed BUY/SELL marker.
+// ============================================================================
 
-buyBOSOK =
-     not requireBOS or bullBOS
+watchBuy =
+     chartTFValid and
+     inSession and
+     volatilityOK and
+     cooldownOK and
+     bullHTFAligned and
+     bullSweep and
+     bullPA and
+     not bullBOS
 
-sellBOSOK =
-     not requireBOS or bearBOS
+watchSell =
+     chartTFValid and
+     inSession and
+     volatilityOK and
+     cooldownOK and
+     bearHTFAligned and
+     bearSweep and
+     bearPA and
+     not bearBOS
+
+
+// ============================================================================
+// FINAL CONFIRMED SETUP
+//
+// ALL major sequence requirements must be satisfied.
+//
+// No signal until the chart candle closes.
+// ============================================================================
 
 buySignal =
      barstate.isconfirmed and
+     chartTFValid and
+     inSession and
+     volatilityOK and
      cooldownOK and
-     (not useBias or biasBull) and
-     (not useStructure or structureBull) and
-     (not useLocation or locationBull or locationSweepBull) and
-     buySweepOK and
-     buyBOSOK and
-     bullPA and
+     bullHTFAligned and
+     (not requireSweep or bullSweep) and
+     (not requirePA or bullPA) and
+     (not requireBOS or bullBOS) and
      localBull and
-     bullScore >= minimumScore
+     bullScore >= minimumScore and
+     bullScore >= confirmedScore and
+     buyRiskOK
 
 sellSignal =
      barstate.isconfirmed and
+     chartTFValid and
+     inSession and
+     volatilityOK and
      cooldownOK and
-     (not useBias or biasBear) and
-     (not useStructure or structureBear) and
-     (not useLocation or locationBear or locationSweepBear) and
-     sellSweepOK and
-     sellBOSOK and
-     bearPA and
+     bearHTFAligned and
+     (not requireSweep or bearSweep) and
+     (not requirePA or bearPA) and
+     (not requireBOS or bearBOS) and
      localBear and
-     bearScore >= minimumScore
+     bearScore >= minimumScore and
+     bearScore >= confirmedScore and
+     sellRiskOK
 
 
-// ═══════════════════════════════════════════════════════════════
-// ENTRY / SL / TP
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// TRADE LEVEL STORAGE
+// ============================================================================
 
 var float entryPrice = na
 var float stopPrice = na
 var float tp1Price = na
 var float tp2Price = na
 
+var string lastDirection = "NONE"
+
+
+// ============================================================================
+// BUY
+// ============================================================================
+
 if buySignal
 
-    entryPrice := close
+    entryPrice := potentialBuyEntry
 
-    stopPrice :=
-         low - atr * slATR
+    stopPrice := potentialBuySL
 
-    risk =
+    buyRiskFinal =
          entryPrice - stopPrice
 
-    tp1Price =
-         entryPrice + risk * tp1RR
+    tp1Price :=
+         entryPrice + buyRiskFinal * tp1RR
 
-    tp2Price =
-         entryPrice + risk * tp2RR
+    tp2Price :=
+         entryPrice + buyRiskFinal * tp2RR
 
     lastSignalBar := bar_index
 
+    lastDirection := "BUY"
+
+
+// ============================================================================
+// SELL
+// ============================================================================
 
 if sellSignal
 
-    entryPrice := close
+    entryPrice := potentialSellEntry
 
-    stopPrice :=
-         high + atr * slATR
+    stopPrice := potentialSellSL
 
-    risk =
+    sellRiskFinal =
          stopPrice - entryPrice
 
-    tp1Price =
-         entryPrice - risk * tp1RR
+    tp1Price :=
+         entryPrice - sellRiskFinal * tp1RR
 
-    tp2Price =
-         entryPrice - risk * tp2RR
+    tp2Price :=
+         entryPrice - sellRiskFinal * tp2RR
 
     lastSignalBar := bar_index
 
+    lastDirection := "SELL"
 
-// ═══════════════════════════════════════════════════════════════
-// SIGNAL MARKERS
-// ═══════════════════════════════════════════════════════════════
+
+// ============================================================================
+// BUY / SELL MARKERS
+// ============================================================================
 
 plotshape(
      buySignal,
-     title="CONFIRMED BUY",
+     title="V3 CONFIRMED BUY",
      style=shape.triangleup,
      location=location.belowbar,
      color=color.lime,
@@ -669,7 +993,7 @@ plotshape(
 
 plotshape(
      sellSignal,
-     title="CONFIRMED SELL",
+     title="V3 CONFIRMED SELL",
      style=shape.triangledown,
      location=location.abovebar,
      color=color.red,
@@ -677,13 +1001,36 @@ plotshape(
      text="SELL")
 
 
-// ═══════════════════════════════════════════════════════════════
-// SWEEP MARKERS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// WATCH MARKERS
+// ============================================================================
+
+plotshape(
+     showWatch and watchBuy,
+     title="V3 WATCH BUY",
+     style=shape.circle,
+     location=location.belowbar,
+     color=color.yellow,
+     size=size.tiny,
+     text="WATCH")
+
+plotshape(
+     showWatch and watchSell,
+     title="V3 WATCH SELL",
+     style=shape.circle,
+     location=location.abovebar,
+     color=color.yellow,
+     size=size.tiny,
+     text="WATCH")
+
+
+// ============================================================================
+// LIQUIDITY MARKERS
+// ============================================================================
 
 plotshape(
      showSweep and bullSweep,
-     title="Bullish Sweep",
+     title="Bullish Liquidity Sweep",
      style=shape.circle,
      location=location.belowbar,
      color=color.aqua,
@@ -692,7 +1039,7 @@ plotshape(
 
 plotshape(
      showSweep and bearSweep,
-     title="Bearish Sweep",
+     title="Bearish Liquidity Sweep",
      style=shape.circle,
      location=location.abovebar,
      color=color.orange,
@@ -700,9 +1047,9 @@ plotshape(
      text="LQ")
 
 
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 // BOS MARKERS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 plotshape(
      showBOS and bullBOS,
@@ -725,14 +1072,15 @@ plotshape(
      text="BOS")
 
 
-// ═══════════════════════════════════════════════════════════════
-// LEVELS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// LEVEL LINES
+// ============================================================================
 
 var line entryLine = na
 var line slLine = na
 var line tp1Line = na
 var line tp2Line = na
+
 
 if buySignal or sellSignal
 
@@ -753,7 +1101,7 @@ if buySignal or sellSignal
         entryLine := line.new(
              bar_index,
              entryPrice,
-             bar_index + 30,
+             bar_index + 40,
              entryPrice,
              color=color.white,
              width=2)
@@ -761,7 +1109,7 @@ if buySignal or sellSignal
         slLine := line.new(
              bar_index,
              stopPrice,
-             bar_index + 30,
+             bar_index + 40,
              stopPrice,
              color=color.red,
              width=2)
@@ -769,7 +1117,7 @@ if buySignal or sellSignal
         tp1Line := line.new(
              bar_index,
              tp1Price,
-             bar_index + 30,
+             bar_index + 40,
              tp1Price,
              color=color.yellow,
              width=2)
@@ -777,15 +1125,15 @@ if buySignal or sellSignal
         tp2Line := line.new(
              bar_index,
              tp2Price,
-             bar_index + 30,
+             bar_index + 40,
              tp2Price,
              color=color.lime,
              width=2)
 
 
-// ═══════════════════════════════════════════════════════════════
-// SIGNAL LABEL
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// SIGNAL LABELS
+// ============================================================================
 
 if buySignal
 
@@ -797,7 +1145,8 @@ if buySignal
          "Entry: " + str.tostring(entryPrice, format.mintick) + "\n" +
          "SL: " + str.tostring(stopPrice, format.mintick) + "\n" +
          "TP1: " + str.tostring(tp1Price, format.mintick) + "\n" +
-         "TP2: " + str.tostring(tp2Price, format.mintick),
+         "TP2: " + str.tostring(tp2Price, format.mintick) + "\n" +
+         "R:R: 1:" + str.tostring(tp2RR),
          style=label.style_label_up,
          color=color.green,
          textcolor=color.white,
@@ -814,16 +1163,45 @@ if sellSignal
          "Entry: " + str.tostring(entryPrice, format.mintick) + "\n" +
          "SL: " + str.tostring(stopPrice, format.mintick) + "\n" +
          "TP1: " + str.tostring(tp1Price, format.mintick) + "\n" +
-         "TP2: " + str.tostring(tp2Price, format.mintick),
+         "TP2: " + str.tostring(tp2Price, format.mintick) + "\n" +
+         "R:R: 1:" + str.tostring(tp2RR),
          style=label.style_label_down,
          color=color.red,
          textcolor=color.white,
          size=size.small)
 
 
-// ═══════════════════════════════════════════════════════════════
-// EMAs
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// WATCH LABELS
+// ============================================================================
+
+if showWatch and watchBuy
+
+    label.new(
+         bar_index,
+         low,
+         "WATCH BUY\nWAIT FOR BOS",
+         style=label.style_label_up,
+         color=color.orange,
+         textcolor=color.white,
+         size=size.tiny)
+
+
+if showWatch and watchSell
+
+    label.new(
+         bar_index,
+         high,
+         "WATCH SELL\nWAIT FOR BOS",
+         style=label.style_label_down,
+         color=color.orange,
+         textcolor=color.white,
+         size=size.tiny)
+
+
+// ============================================================================
+// EMA
+// ============================================================================
 
 plot(
      showEMA ? emaFast : na,
@@ -838,16 +1216,17 @@ plot(
      linewidth=2)
 
 
-// ═══════════════════════════════════════════════════════════════
-// MTF DASHBOARD
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
+// DASHBOARD
+// ============================================================================
 
 var table dashboard =
      table.new(
          position.top_right,
          3,
-         11,
+         15,
          border_width=1)
+
 
 f_row(row, name, state, bullState, bearState) =>
 
@@ -881,13 +1260,17 @@ f_row(row, name, state, bullState, bearState) =>
              color.gray)
 
 
+// ============================================================================
+// DASHBOARD UPDATE
+// ============================================================================
+
 if barstate.islast and showDashboard
 
     table.cell(
          dashboard,
          0,
          0,
-         "XAUUSD MTF V2",
+         "XAUUSD SMART PA V3",
          bgcolor=color.black,
          text_color=color.white)
 
@@ -903,9 +1286,15 @@ if barstate.islast and showDashboard
          dashboard,
          2,
          0,
-         "CONFIRMED",
+         chartTFValid ? "READY" : "WRONG TF",
          bgcolor=color.black,
-         text_color=color.lime)
+         text_color=
+             chartTFValid ? color.lime : color.red)
+
+
+    // ------------------------------------------------------------
+    // BIAS
+    // ------------------------------------------------------------
 
     f_row(
          1,
@@ -916,6 +1305,11 @@ if barstate.islast and showDashboard
          biasBull,
          biasBear)
 
+
+    // ------------------------------------------------------------
+    // STRUCTURE
+    // ------------------------------------------------------------
+
     f_row(
          2,
          "STRUCT " + structureTF,
@@ -924,6 +1318,11 @@ if barstate.islast and showDashboard
          "NEUTRAL",
          structureBull,
          structureBear)
+
+
+    // ------------------------------------------------------------
+    // LOCATION
+    // ------------------------------------------------------------
 
     f_row(
          3,
@@ -936,130 +1335,277 @@ if barstate.islast and showDashboard
          locationSweepBull or locationBull,
          locationSweepBear or locationBear)
 
+
+    // ------------------------------------------------------------
+    // 5M PRICE ACTION
+    // ------------------------------------------------------------
+
     f_row(
          4,
-         "ENTRY TF",
+         "PRICE ACTION",
          bullPA ? "BULL PA" :
          bearPA ? "BEAR PA" :
          "WAIT",
          bullPA,
          bearPA)
 
+
+    // ------------------------------------------------------------
+    // LIQUIDITY
+    // ------------------------------------------------------------
+
     f_row(
          5,
-         "ENTRY LIQ",
+         "5M LIQUIDITY",
          bullSweep ? "BUY SWEEP" :
          bearSweep ? "SELL SWEEP" :
          "NONE",
          bullSweep,
          bearSweep)
 
+
+    // ------------------------------------------------------------
+    // BOS
+    // ------------------------------------------------------------
+
     f_row(
          6,
-         "ENTRY BOS",
+         "5M BOS",
          bullBOS ? "BULL BOS" :
          bearBOS ? "BEAR BOS" :
          "WAIT",
          bullBOS,
          bearBOS)
 
+
+    // ------------------------------------------------------------
+    // LOCAL TREND
+    // ------------------------------------------------------------
+
+    f_row(
+         7,
+         "LOCAL TREND",
+         localBull ? "BULL" :
+         localBear ? "BEAR" :
+         "NEUTRAL",
+         localBull,
+         localBear)
+
+
+    // ------------------------------------------------------------
+    // BUY SCORE
+    // ------------------------------------------------------------
+
     table.cell(
          dashboard,
          0,
-         7,
+         8,
          "BUY SCORE",
          text_color=color.white)
 
     table.cell(
          dashboard,
          1,
-         7,
+         8,
          str.tostring(bullScore) + "/11",
-         text_color=color.lime)
+         text_color=
+             bullScore >= confirmedScore ?
+             color.lime :
+             color.gray)
+
+
+    // ------------------------------------------------------------
+    // SELL SCORE
+    // ------------------------------------------------------------
 
     table.cell(
          dashboard,
          0,
-         8,
+         9,
          "SELL SCORE",
          text_color=color.white)
 
     table.cell(
          dashboard,
          1,
-         8,
+         9,
          str.tostring(bearScore) + "/11",
-         text_color=color.red)
+         text_color=
+             bearScore >= confirmedScore ?
+             color.red :
+             color.gray)
+
+
+    // ------------------------------------------------------------
+    // ATR
+    // ------------------------------------------------------------
 
     table.cell(
          dashboard,
          0,
-         9,
+         10,
          "ATR",
          text_color=color.white)
 
     table.cell(
          dashboard,
          1,
-         9,
+         10,
          str.tostring(atr, format.mintick),
          text_color=color.yellow)
+
+
+    // ------------------------------------------------------------
+    // VOLATILITY
+    // ------------------------------------------------------------
 
     table.cell(
          dashboard,
          0,
-         10,
-         "STATUS",
+         11,
+         "VOLATILITY",
          text_color=color.white)
 
     table.cell(
          dashboard,
          1,
-         10,
-         buySignal ? "🔥 BUY" :
-         sellSignal ? "🔥 SELL" :
-         bullScore >= minimumScore ? "WATCH BUY" :
-         bearScore >= minimumScore ? "WATCH SELL" :
-         "WAIT",
+         11,
+         volatilityOK ? "NORMAL" : "EXTREME",
          text_color=
-             buySignal ? color.lime :
-             sellSignal ? color.red :
-             color.yellow)
+             volatilityOK ?
+             color.lime :
+             color.red)
 
 
-// ═══════════════════════════════════════════════════════════════
+    // ------------------------------------------------------------
+    // SESSION
+    // ------------------------------------------------------------
+
+    table.cell(
+         dashboard,
+         0,
+         12,
+         "SESSION",
+         text_color=color.white)
+
+    table.cell(
+         dashboard,
+         1,
+         12,
+         inSession ? "ACTIVE" : "OFF",
+         text_color=
+             inSession ?
+             color.lime :
+             color.gray)
+
+
+    // ------------------------------------------------------------
+    // R:R
+    // ------------------------------------------------------------
+
+    table.cell(
+         dashboard,
+         0,
+         13,
+         "R:R",
+         text_color=color.white)
+
+    currentRR =
+         bullSignal or watchBuy ?
+         buyRR :
+         bearSignal or watchSell ?
+         sellRR :
+         math.max(buyRR, sellRR)
+
+    table.cell(
+         dashboard,
+         1,
+         13,
+         "1:" + str.tostring(currentRR, "#.##"),
+         text_color=
+             currentRR >= minimumRR ?
+             color.lime :
+             color.red)
+
+
+    // ------------------------------------------------------------
+    // STATUS
+    // ------------------------------------------------------------
+
+    table.cell(
+         dashboard,
+         0,
+         14,
+         "STATUS",
+         text_color=color.white)
+
+    statusText =
+         buySignal ? "🔥 CONFIRMED BUY" :
+         sellSignal ? "🔥 CONFIRMED SELL" :
+         watchBuy ? "🟡 WATCH BUY" :
+         watchSell ? "🟡 WATCH SELL" :
+         not chartTFValid ? "⚠ USE " + entryTF :
+         not inSession ? "WAIT SESSION" :
+         not volatilityOK ? "WAIT VOLATILITY" :
+         "WAIT"
+
+    statusColor =
+         buySignal ? color.lime :
+         sellSignal ? color.red :
+         watchBuy or watchSell ? color.orange :
+         color.yellow
+
+    table.cell(
+         dashboard,
+         1,
+         14,
+         statusText,
+         text_color=statusColor)
+
+
+// ============================================================================
 // ALERTS
-// ═══════════════════════════════════════════════════════════════
+// ============================================================================
 
 alertcondition(
      buySignal,
-     title="XAUUSD V2 CONFIRMED BUY",
-     message="XAUUSD V2 CONFIRMED BUY — MTF bias, structure, liquidity and entry confirmation aligned.")
+     title="XAUUSD V3 CONFIRMED BUY",
+     message="XAUUSD V3 CONFIRMED BUY — HTF bias + structure + liquidity sweep + PA + BOS + risk conditions aligned.")
 
 alertcondition(
      sellSignal,
-     title="XAUUSD V2 CONFIRMED SELL",
-     message="XAUUSD V2 CONFIRMED SELL — MTF bias, structure, liquidity and entry confirmation aligned.")
+     title="XAUUSD V3 CONFIRMED SELL",
+     message="XAUUSD V3 CONFIRMED SELL — HTF bias + structure + liquidity sweep + PA + BOS + risk conditions aligned.")
+
+alertcondition(
+     watchBuy,
+     title="XAUUSD V3 WATCH BUY",
+     message="XAUUSD V3 WATCH BUY — liquidity and price action developing. Wait for confirmed BOS.")
+
+alertcondition(
+     watchSell,
+     title="XAUUSD V3 WATCH SELL",
+     message="XAUUSD V3 WATCH SELL — liquidity and price action developing. Wait for confirmed BOS.")
 
 alertcondition(
      bullSweep,
-     title="XAUUSD Bullish Liquidity Sweep",
-     message="XAUUSD bullish liquidity sweep confirmed.")
+     title="XAUUSD V3 Bullish Liquidity Sweep",
+     message="XAUUSD V3 bullish liquidity sweep detected.")
 
 alertcondition(
      bearSweep,
-     title="XAUUSD Bearish Liquidity Sweep",
-     message="XAUUSD bearish liquidity sweep confirmed.")
+     title="XAUUSD V3 Bearish Liquidity Sweep",
+     message="XAUUSD V3 bearish liquidity sweep detected.")
 
 alertcondition(
      bullBOS,
-     title="XAUUSD Bullish BOS",
-     message="XAUUSD bullish BOS confirmed.")
+     title="XAUUSD V3 Bullish BOS",
+     message="XAUUSD V3 bullish BOS confirmed.")
 
 alertcondition(
      bearBOS,
-     title="XAUUSD Bearish BOS",
-     message="XAUUSD bearish BOS confirmed.")
+     title="XAUUSD V3 Bearish BOS",
+     message="XAUUSD V3 bearish BOS confirmed.")
 
 
 
@@ -1068,30 +1614,30 @@ alertcondition(
 
 
 
-Trading Mode              = 5M
-HTF Bias                  = ON
-Structure TF              = ON
-Location TF               = ON
-Require Entry Sweep       = ON
-Require Entry BOS         = ON
 
-Fast EMA                  = 20
-Slow EMA                  = 50
 
-Swing Length              = 5
-BOS Lookback              = 5
 
-Liquidity Lookback        = 10
-Maximum Sweep ATR         = 0.20
-
-Pin Bars                  = ON
-Engulfing                 = ON
-Pin Wick / Body           = 2.0
-
-ATR Length                = 14
-SL ATR Buffer             = 0.35
-TP1                       = 1R
-TP2                       = 2R
-
-Minimum Score             = 7
-Cooldown                  = 5
+| Setting              | V3 starting value |
+| -------------------- | ----------------: |
+| Trading Mode         |            **5M** |
+| HTF Bias             |                ON |
+| Structure TF         |                ON |
+| Location TF          |                ON |
+| Require 5M Sweep     |            **ON** |
+| Require 5M BOS       |            **ON** |
+| Require Price Action |            **ON** |
+| Fast EMA             |                20 |
+| Slow EMA             |                50 |
+| Liquidity Lookback   |                10 |
+| Sweep ATR            |              0.20 |
+| Pin Wick/Body        |               2.0 |
+| ATR                  |                14 |
+| Structural SL Buffer |      **0.20 ATR** |
+| TP1                  |            **1R** |
+| TP2                  |            **2R** |
+| Minimum R:R          |           **1.5** |
+| Minimum Score        |             **8** |
+| Confirmed Score      |             **8** |
+| Cooldown             |        **8 bars** |
+| Volatility Filter    |                ON |
+| Session Filter       |                ON |
