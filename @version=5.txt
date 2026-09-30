@@ -1,0 +1,215 @@
+//@version=5
+strategy("Advanced Price Action Strategy (Safe + Visual)", 
+     overlay=true, 
+     initial_capital=10000, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=100,          // we override with risk-based size
+     commission_type=strategy.commission.percent, 
+     commission_value=0.04,
+     slippage=1,
+     process_orders_on_close=false)
+
+//══════════════════════════════════════════════════════════════
+// INPUTS
+//══════════════════════════════════════════════════════════════
+string groupTrend   = "Trend Filter"
+int    trendEMA     = input.int(50, "EMA Period", minval=10, group=groupTrend)
+string htfTimeframe = input.timeframe("240", "Higher Timeframe", group=groupTrend)
+
+string groupSR      = "Support / Resistance"
+int    pivotLookback = input.int(8, "Pivot Lookback", minval=3, group=groupSR)
+float  atrProxMult  = input.float(0.6, "ATR Proximity Multiplier", minval=0.2, maxval=2.0, step=0.1, group=groupSR)
+
+string groupRisk    = "Risk Management"
+float  riskPercent  = input.float(1.0, "Risk % of Equity per Trade", minval=0.1, maxval=5.0, step=0.1, group=groupRisk)
+float  rrRatio      = input.float(2.0, "Risk : Reward Ratio", minval=1.0, maxval=5.0, step=0.1, group=groupRisk)
+float  atrStopMult  = input.float(0.4, "ATR Buffer for Stop", minval=0.1, maxval=1.5, step=0.1, group=groupRisk)
+
+string groupTrail   = "Trailing Stop (Optional)"
+bool   useTrailing  = input.bool(true, "Enable Trailing Stop", group=groupTrail)
+float  trailAtrMult = input.float(1.5, "Trailing ATR Multiplier", minval=0.5, maxval=4.0, step=0.1, group=groupTrail)
+float  trailOffset  = input.float(0.5, "Trail Activation (in R)", minval=0.5, maxval=3.0, step=0.1, group=groupTrail)
+
+string groupFilters = "Extra Filters"
+bool   useVolume    = input.bool(true, "Require Volume Confirmation", group=groupFilters)
+bool   useVolatility= input.bool(true, "Require Minimum Volatility", group=groupFilters)
+float  minAtrPct    = input.float(0.25, "Min ATR % of Price", minval=0.05, maxval=1.0, step=0.05, group=groupFilters)
+
+//══════════════════════════════════════════════════════════════
+// CALCULATIONS
+//══════════════════════════════════════════════════════════════
+float atr = ta.atr(14)
+float ema = ta.ema(close, trendEMA)
+
+// Higher timeframe trend
+float htfEma = request.security(syminfo.tickerid, htfTimeframe, ta.ema(close, trendEMA), barmerge.gaps_off, barmerge.lookahead_off)
+bool htfBull = close > htfEma
+bool htfBear = close < htfEma
+
+// Volume & Volatility filters
+bool volOk   = not useVolume or volume > ta.sma(volume, 20)
+bool volaOk  = not useVolatility or (atr / close * 100) > minAtrPct
+
+//══════════════════════════════════════════════════════════════
+// SUPPORT & RESISTANCE (Recent Pivots)
+//══════════════════════════════════════════════════════════════
+float pivotHigh = ta.pivothigh(high, pivotLookback, pivotLookback)
+float pivotLow  = ta.pivotlow(low, pivotLookback, pivotLookback)
+
+var float resistance = na
+var float support    = na
+
+if not na(pivotHigh)
+    resistance := pivotHigh
+if not na(pivotLow)
+    support := pivotLow
+
+// ATR-based proximity (much better than % )
+bool nearSupport    = not na(support)    and math.abs(low  - support)    <= atr * atrProxMult
+bool nearResistance = not na(resistance) and math.abs(high - resistance) <= atr * atrProxMult
+
+//══════════════════════════════════════════════════════════════
+// PRICE ACTION PATTERNS (Strict)
+//══════════════════════════════════════════════════════════════
+bool isBull = close > open
+bool isBear = close < open
+float body  = math.abs(close - open)
+float upperWick = high - math.max(open, close)
+float lowerWick = math.min(open, close) - low
+
+// Strict Pin Bars
+bool bullPin = lowerWick > body * 2.5 and upperWick < body * 0.35 and body > atr * 0.08
+bool bearPin = upperWick > body * 2.5 and lowerWick < body * 0.35 and body > atr * 0.08
+
+// Engulfing
+bool bullEngulf = isBear[1] and isBull and close >= open[1] and open <= close[1] and body > body[1] * 0.9
+bool bearEngulf = isBull[1] and isBear and close <= open[1] and open >= close[1] and body > body[1] * 0.9
+
+//══════════════════════════════════════════════════════════════
+// ENTRY CONDITIONS (Full Confluence)
+//══════════════════════════════════════════════════════════════
+bool longSetup  = nearSupport    and (bullPin or bullEngulf) and close > ema and htfBull and volOk and volaOk and strategy.position_size == 0
+bool shortSetup = nearResistance and (bearPin or bearEngulf) and close < ema and htfBear and volOk and volaOk and strategy.position_size == 0
+
+//══════════════════════════════════════════════════════════════
+// TRADE MANAGEMENT VARIABLES
+//══════════════════════════════════════════════════════════════
+var float entryPrice = na
+var float stopLoss   = na
+var float takeProfit = na
+var float riskDist   = na
+var label entryLabel = na
+var label slLabel    = na
+var label tpLabel    = na
+var line  entryLine  = na
+var line  slLine     = na
+var line  tpLine     = na
+
+//══════════════════════════════════════════════════════════════
+// LONG ENTRY
+//══════════════════════════════════════════════════════════════
+if longSetup
+    entryPrice := close
+    stopLoss   := low - atr * atrStopMult
+    riskDist   := entryPrice - stopLoss
+    takeProfit := entryPrice + riskDist * rrRatio
+
+    // Risk-based position size
+    float riskAmount = strategy.equity * (riskPercent / 100)
+    float qty = riskDist > 0 ? riskAmount / riskDist : na
+
+    strategy.entry("Long", strategy.long, qty=qty)
+
+    // Trailing or fixed exit
+    if useTrailing
+        strategy.exit("Long Exit", "Long", 
+             stop=stopLoss, 
+             limit=takeProfit,
+             trail_offset=atr * trailAtrMult / syminfo.mintick,
+             trail_points=atr * trailAtrMult / syminfo.mintick)
+    else
+        strategy.exit("Long Exit", "Long", stop=stopLoss, limit=takeProfit)
+
+    // Clean previous labels/lines
+    if not na(entryLabel)
+        label.delete(entryLabel)
+        label.delete(slLabel)
+        label.delete(tpLabel)
+        line.delete(entryLine)
+        line.delete(slLine)
+        line.delete(tpLine)
+
+    // Draw new visuals
+    entryLine := line.new(bar_index, entryPrice, bar_index + 15, entryPrice, color=color.white, width=2)
+    slLine    := line.new(bar_index, stopLoss,   bar_index + 15, stopLoss,   color=color.red,   width=2)
+    tpLine    := line.new(bar_index, takeProfit, bar_index + 15, takeProfit, color=color.green, width=2)
+
+    entryLabel := label.new(bar_index, entryPrice, "ENTRY\n" + str.tostring(entryPrice, format.mintick), 
+         style=label.style_label_left, color=color.white, textcolor=color.black, size=size.normal)
+    slLabel    := label.new(bar_index, stopLoss, "SL\n" + str.tostring(stopLoss, format.mintick), 
+         style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
+    tpLabel    := label.new(bar_index, takeProfit, "TP (" + str.tostring(rrRatio) + "R)\n" + str.tostring(takeProfit, format.mintick), 
+         style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
+
+//══════════════════════════════════════════════════════════════
+// SHORT ENTRY
+//══════════════════════════════════════════════════════════════
+if shortSetup
+    entryPrice := close
+    stopLoss   := high + atr * atrStopMult
+    riskDist   := stopLoss - entryPrice
+    takeProfit := entryPrice - riskDist * rrRatio
+
+    float riskAmount = strategy.equity * (riskPercent / 100)
+    float qty = riskDist > 0 ? riskAmount / riskDist : na
+
+    strategy.entry("Short", strategy.short, qty=qty)
+
+    if useTrailing
+        strategy.exit("Short Exit", "Short", 
+             stop=stopLoss, 
+             limit=takeProfit,
+             trail_offset=atr * trailAtrMult / syminfo.mintick,
+             trail_points=atr * trailAtrMult / syminfo.mintick)
+    else
+        strategy.exit("Short Exit", "Short", stop=stopLoss, limit=takeProfit)
+
+    // Clean previous
+    if not na(entryLabel)
+        label.delete(entryLabel)
+        label.delete(slLabel)
+        label.delete(tpLabel)
+        line.delete(entryLine)
+        line.delete(slLine)
+        line.delete(tpLine)
+
+    // Draw new
+    entryLine := line.new(bar_index, entryPrice, bar_index + 15, entryPrice, color=color.white, width=2)
+    slLine    := line.new(bar_index, stopLoss,   bar_index + 15, stopLoss,   color=color.red,   width=2)
+    tpLine    := line.new(bar_index, takeProfit, bar_index + 15, takeProfit, color=color.green, width=2)
+
+    entryLabel := label.new(bar_index, entryPrice, "ENTRY\n" + str.tostring(entryPrice, format.mintick), 
+         style=label.style_label_left, color=color.white, textcolor=color.black, size=size.normal)
+    slLabel    := label.new(bar_index, stopLoss, "SL\n" + str.tostring(stopLoss, format.mintick), 
+         style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
+    tpLabel    := label.new(bar_index, takeProfit, "TP (" + str.tostring(rrRatio) + "R)\n" + str.tostring(takeProfit, format.mintick), 
+         style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
+
+//══════════════════════════════════════════════════════════════
+// VISUALS
+//══════════════════════════════════════════════════════════════
+plot(ema, "Trend EMA", color=color.new(color.blue, 0), linewidth=2)
+plot(resistance, "Resistance", color=color.new(color.red, 60), style=plot.style_linebr, linewidth=2)
+plot(support,    "Support",    color=color.new(color.green, 60), style=plot.style_linebr, linewidth=2)
+
+plotshape(longSetup,  title="Long Setup",  style=shape.triangleup,   location=location.belowbar, color=color.lime,  size=size.normal, text="BUY")
+plotshape(shortSetup, title="Short Setup", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.normal, text="SELL")
+
+// Background for open trades
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 92) : strategy.position_size < 0 ? color.new(color.red, 92) : na)
+
+//══════════════════════════════════════════════════════════════
+// ALERTS
+//══════════════════════════════════════════════════════════════
+alertcondition(longSetup,  "Long Setup",  "Price Action Long Setup")
+alertcondition(shortSetup, "Short Setup", "Price Action Short Setup")
